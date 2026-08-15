@@ -1,0 +1,12 @@
+schema: mcpg.dev/plugin/v1
+id: dev.mcpg.ip-allowlist
+name: IP Allowlist
+license: Apache-2.0
+description: |
+  Admission gate that denies requests whose client IP is outside a
+  configured CIDR allowlist. Supports X-Forwarded-For parsing with
+  trusted-proxy depth.
+class: tool_gate
+runtime: native-cdylib-v1
+protocol_version: "1.0"
+required_capabilities: []
