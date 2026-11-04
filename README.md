@@ -13,9 +13,12 @@ caller claims to be.
 ## What it does
 - Parses every `allow` entry into a network at load time. An unparseable CIDR
   refuses to register rather than silently shrinking the allowlist.
-- Reads the caller's address from a `_request_headers` map on the evaluation
-  config, taking the first comma-separated value of `ip_header` and falling back
-  to `x-real-ip`.
+- Reads the caller's address that the mcpg gateway resolved, which it passes as
+  `_client_ip` on the evaluation config: the transport peer, or the first
+  `X-Forwarded-For` hop when `gateway.server.trust_proxy_ip` is `true`. A host
+  that passes request headers instead puts them in a `_request_headers` map;
+  the gate then takes the first comma-separated value of `ip_header`, falling
+  back to `x-real-ip`.
 - Normalises IPv4-mapped IPv6 addresses before matching, so `::ffff:10.0.0.1` is
   covered by an allowlist entry of `10.0.0.0/8` and a dual-stack hop cannot slip
   past an IPv4 range.
@@ -59,16 +62,16 @@ OS, architecture and libc.
 Unknown fields are rejected.
 
 ## Security
-- **Know where the address comes from.** The gate does not open a socket and has
-  no view of the transport peer: it reads the address out of a `_request_headers`
-  map inside the config object it is handed at evaluation time. A host that does
-  not populate that map leaves the gate with nothing to match, and every gated
-  call is denied. Confirm the address actually arrives before relying on this
-  gate as your only network control.
-- **The leftmost forwarded hop is used.** `X-Forwarded-For` is read from its
-  first value, and there is no trusted-proxy-depth accounting, so a caller able
-  to set the header chooses the address the gate sees. Deploy behind a proxy that
-  overwrites the header rather than appending to it.
+- **Know where the address comes from.** The gate does not open a socket: it
+  matches the address the host puts on the evaluation config. Behind the mcpg
+  gateway that is the transport peer, so behind a load balancer every caller
+  has the balancer's address until you set `gateway.server.trust_proxy_ip:
+  true`. A call with no address is denied.
+- **The leftmost forwarded hop is used.** With `trust_proxy_ip: true` the
+  gateway takes the first `X-Forwarded-For` value, and there is no
+  trusted-proxy-depth accounting, so a caller able to set the header chooses
+  the address the gate sees. Set it only behind a proxy that overwrites the
+  header rather than appending to it.
 - **Bad configuration fails the load.** An invalid CIDR aborts construction,
   which the host turns into a registration failure. The gate never runs with a
   partially parsed allowlist.

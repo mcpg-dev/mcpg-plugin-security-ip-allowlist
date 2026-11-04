@@ -129,8 +129,18 @@ impl IpAllowlistPlugin {
     }
 
     fn extract_client_ip(&self, config: &serde_json::Value) -> Option<IpAddr> {
-        // Try the configured header from plugin config context
-        // The gateway puts request headers in config["_request_headers"]
+        // The mcpg gateway passes the address it resolved (the transport
+        // peer, or the first X-Forwarded-For hop under
+        // `server.trust_proxy_ip`) as config["_client_ip"].
+        if let Some(ip) = config
+            .get("_client_ip")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        {
+            return Some(normalize_mapped_ipv4(ip));
+        }
+        // A host that passes request headers puts them in
+        // config["_request_headers"].
         if let Some(headers) = config.get("_request_headers").and_then(|h| h.as_object()) {
             // X-Forwarded-For can have comma-separated IPs; take the first (client)
             if let Some(header_val) = headers.get(&self.ip_header).and_then(|v| v.as_str()) {
@@ -585,6 +595,31 @@ mod tests {
         let config = config_with_headers(&[("x-forwarded-for", "10.1.2.3")]);
         let decision = plugin.evaluate_pre(&ctx, &serde_json::json!({}), None, &config);
         assert!(decision.is_allow());
+    }
+
+    #[test]
+    fn the_host_resolved_address_wins_over_a_forwarded_header() {
+        let plugin = IpAllowlistPlugin::from_config(&serde_json::json!({
+            "allow": ["10.0.0.0/8"],
+        }))
+        .unwrap();
+        let ctx = test_ctx("tool");
+        let admitted = serde_json::json!({ "_client_ip": "10.1.2.3" });
+        assert!(
+            plugin
+                .evaluate_pre(&ctx, &serde_json::json!({}), None, &admitted)
+                .is_allow()
+        );
+        // A caller-set header cannot replace the address the host resolved.
+        let spoofed = serde_json::json!({
+            "_client_ip": "203.0.113.9",
+            "_request_headers": { "x-forwarded-for": "10.1.2.3" },
+        });
+        assert!(
+            !plugin
+                .evaluate_pre(&ctx, &serde_json::json!({}), None, &spoofed)
+                .is_allow()
+        );
     }
 
     #[test]
